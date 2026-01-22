@@ -1,0 +1,28 @@
+{
+  "name": "video-transcriber",
+  "version": "1.0.0",
+  "description": "Automatic video transcription using Groq Whisper AI",
+  "main": "transcribe.js",
+  "type": "module",
+  "scripts": {
+    "start": "node transcribe.js",
+    "transcribe": "node transcribe.js"
+  },
+  "keywords": [
+    "video",
+    "transcription",
+    "whisper",
+    "groq",
+    "ai",
+    "speech-to-text",
+    "subtitles"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "dotenv": "^17.2.3"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
