@@ -8,7 +8,7 @@ const CONFIG = {
   CHUNK_DURATION: 1200, // 20 минут в секундах
   TEMP_DIR: "./temp",
   OUTPUT_DIR: "./output",
-  FFMPEG_PATH: "C:\\Users\\Diamond\\AppData\\Local\\Microsoft\\WinGet\\Packages\\Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe\\ffmpeg-8.0.1-full_build\\bin\\ffmpeg.exe",
+  FFMPEG_PATH: process.env.FFMPEG_PATH || "ffmpeg",
   MODELS: ["whisper-large-v3-turbo", "whisper-large-v3"], // переключаемся при rate limit
   LANGUAGE: "ru", // auto, en, ru, etc.
   RATE_LIMIT_DELAY: 15000, // пауза между запросами (мс) - 15 сек для rate limit
