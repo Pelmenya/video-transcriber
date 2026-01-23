@@ -9,9 +9,9 @@ const CONFIG = {
   TEMP_DIR: "./temp",
   OUTPUT_DIR: "./output",
   FFMPEG_PATH: "C:\\Users\\Diamond\\AppData\\Local\\Microsoft\\WinGet\\Packages\\Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe\\ffmpeg-8.0.1-full_build\\bin\\ffmpeg.exe",
-  MODEL: "whisper-large-v3",
+  MODELS: ["whisper-large-v3-turbo", "whisper-large-v3"], // переключаемся при rate limit
   LANGUAGE: "ru", // auto, en, ru, etc.
-  RATE_LIMIT_DELAY: 5000, // пауза между запросами (мс)
+  RATE_LIMIT_DELAY: 15000, // пауза между запросами (мс) - 15 сек для rate limit
   VIDEO_EXTENSIONS: [".mp4", ".avi", ".mov", ".mkv", ".webm", ".flv", ".wmv"],
 };
 
@@ -59,24 +59,59 @@ async function splitAudio(audioPath, videoName) {
   return chunks;
 }
 
-// Транскрибация одной части
+// Транскрибация одной части с retry и переключением моделей
 async function transcribeChunk(chunkPath, index, total, videoName) {
   console.log(`🎙️  Транскрибирую часть ${index + 1}/${total}...`);
 
-  const tempOutput = path.join(
-    CONFIG.TEMP_DIR,
-    videoName,
-    `transcription_${index}.json`
-  );
+  for (let modelIdx = 0; modelIdx < CONFIG.MODELS.length; modelIdx++) {
+    const model = CONFIG.MODELS[modelIdx];
+    const maxRetries = 2;
 
-  const curlCommand = `curl -s -X POST "https://api.groq.com/openai/v1/audio/transcriptions" -H "Authorization: Bearer ${process.env.GROQ_API_KEY}" -F "file=@${chunkPath}" -F "model=${CONFIG.MODEL}" -F "language=${CONFIG.LANGUAGE}" -F "response_format=verbose_json" -o "${tempOutput}"`;
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        const curlCommand = `curl -s -w "\\nHTTP_CODE:%{http_code}" -X POST "https://api.groq.com/openai/v1/audio/transcriptions" -H "Authorization: Bearer ${process.env.GROQ_API_KEY}" -F "file=@${chunkPath}" -F "model=${model}" -F "language=${CONFIG.LANGUAGE}" -F "response_format=verbose_json"`;
 
-  execSync(curlCommand, { stdio: "inherit" });
+        const result = execSync(curlCommand, { encoding: "utf-8", maxBuffer: 50 * 1024 * 1024 });
 
-  const transcription = JSON.parse(fs.readFileSync(tempOutput, "utf-8"));
-  fs.unlinkSync(tempOutput);
+        const httpCodeMatch = result.match(/HTTP_CODE:(\d+)/);
+        const httpCode = httpCodeMatch ? httpCodeMatch[1] : "unknown";
+        const jsonResponse = result.replace(/\nHTTP_CODE:\d+$/, "").trim();
 
-  return transcription;
+        if (httpCode === "429") {
+          throw new Error(`RATE_LIMIT`);
+        }
+
+        if (httpCode !== "200") {
+          throw new Error(`HTTP ${httpCode}: ${jsonResponse.substring(0, 100)}`);
+        }
+
+        const transcription = JSON.parse(jsonResponse);
+
+        if (!transcription.text) {
+          throw new Error("API вернул пустой текст");
+        }
+
+        console.log(`   ✓ [${model}] ${transcription.text.length} символов`);
+        return transcription;
+
+      } catch (error) {
+        if (error.message === "RATE_LIMIT") {
+          console.log(`   ⚠️ [${model}] Rate limit - переключаемся...`);
+          break; // переходим к следующей модели
+        }
+
+        console.error(`   ⚠️ [${model}] Попытка ${attempt}/${maxRetries}: ${error.message}`);
+
+        if (attempt < maxRetries) {
+          const delay = 15000;
+          console.log(`   ⏳ Ждём ${delay / 1000} сек...`);
+          await new Promise(r => setTimeout(r, delay));
+        }
+      }
+    }
+  }
+
+  throw new Error(`Все модели вернули ошибку`);
 }
 
 // Обработка одного видео
@@ -260,6 +295,11 @@ async function main() {
     console.log(`   ⏭️  Пропущено: ${results.skipped}`);
     console.log(`   ❌ Ошибок: ${results.errors}`);
     console.log(`\n📂 Результаты: ${path.resolve(CONFIG.OUTPUT_DIR)}`);
+
+    // Удаляем папку temp полностью
+    if (fs.existsSync(CONFIG.TEMP_DIR)) {
+      fs.rmSync(CONFIG.TEMP_DIR, { recursive: true, force: true });
+    }
   } catch (error) {
     console.error("\n❌ Фатальная ошибка:", error.message);
     process.exit(1);
